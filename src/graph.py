@@ -25,6 +25,9 @@ Two rules carried over from every earlier phase, enforced structurally here:
     item_id lookup, never from the model's own output.
   - a hallucinated item_id (one the model invents that wasn't in the input) is
     silently dropped, not trusted.
+
+LangSmith integration: all graph nodes are traceable. Set LANGCHAIN_TRACING_V2=true
+and LANGCHAIN_API_KEY to enable tracing.
 """
 
 import re
@@ -38,9 +41,20 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(name=None, run_type="chain"):
+        def decorator(func):
+            return func
+        return decorator
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from context_agent import get_context
 from engine import assess_item, days_to_next_arrival, on_order_qty
+from logger import get_logger
+
+logger = get_logger(__name__, extra_data={"module": "graph"})
 
 
 class SellerSenseState(TypedDict):
@@ -50,6 +64,7 @@ class SellerSenseState(TypedDict):
     total_flagged_count: int
     ranked_recommendations: list[dict]
     seller_decision: Optional[dict]
+    run_metadata: Optional[dict]  # per-run context for tracing
 
 
 class RankedItem(BaseModel):
@@ -98,6 +113,7 @@ def make_gather_signals_node(sales, items, suppliers, festival_calendar, festiva
     is recommended every morning until the goods physically arrive."""
     params_by_item = params_by_item or {}
 
+    @traceable(name="gather_signals", run_type="chain")
     def gather_signals(state: SellerSenseState) -> dict:
         as_of = pd.Timestamp(state["as_of_date"])
         flagged = {}
@@ -273,6 +289,7 @@ def make_reasoning_node(llm, festival_calendar: pd.DataFrame, max_attempts: int 
     structured_llm = llm.with_structured_output(RankedRecommendations)
     all_festival_names = set(festival_calendar["festival_name"])
 
+    @traceable(name="reasoning", run_type="llm")
     def reasoning(state: SellerSenseState) -> dict:
         consumption, context = state["consumption_signals"], state["context_signals"]
         if not consumption:
@@ -338,6 +355,7 @@ def make_reasoning_node(llm, festival_calendar: pd.DataFrame, max_attempts: int 
 
 # ---------------------------------------------------------------- human approval
 
+@traceable(name="human_approval", run_type="chain")
 def human_approval(state: SellerSenseState) -> dict:
     decision = interrupt({
         "recommendations": state["ranked_recommendations"],
@@ -348,8 +366,24 @@ def human_approval(state: SellerSenseState) -> dict:
 
 # ---------------------------------------------------------------- graph assembly
 
-def build_graph(sales, items, suppliers, festival_calendar, festival_overrides, promotions, llm,
-                 max_items: int = 8, params_by_item: dict | None = None, purchase_orders=None):
+@traceable(name="build_graph", run_type="chain")
+def build_graph(
+    sales, items, suppliers, festival_calendar, festival_overrides, 
+    promotions, llm, max_items: int = 8, params_by_item: dict | None = None, 
+    purchase_orders=None
+):
+    """Build the LangGraph orchestrator.
+    
+    Tracing metadata can be passed at invoke time via the config parameter:
+        graph.invoke(state, config=RunnableConfig(
+            tags=["dashboard", "date-2026-08-24"],
+            metadata={"provider": "groq", "n_items": 25}
+        ))
+    """
+    logger.info("Building graph", extra={"extra_data": {
+        "max_items": max_items,
+    }})
+    
     graph = StateGraph(SellerSenseState)
     graph.add_node("gather_signals", make_gather_signals_node(
         sales, items, suppliers, festival_calendar, festival_overrides, promotions, max_items,

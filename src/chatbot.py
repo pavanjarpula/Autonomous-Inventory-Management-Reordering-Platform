@@ -21,6 +21,9 @@ LLM proposes, something else decides.
 No retrieval, no embeddings: the whole flagged set plus recent feedback history
 comfortably fits in a prompt at this scale -- a vector index here would be
 complexity with no payoff.
+
+LangSmith integration: all LLM calls are traceable via @traceable decorators.
+Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY to enable tracing.
 """
 
 import re
@@ -30,9 +33,20 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(name=None, run_type="chain"):
+        def decorator(func):
+            return func
+        return decorator
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from feedback_agent import REASON_CODES
 from graph import _trend_note
+from logger import get_logger
+
+logger = get_logger(__name__, extra_data={"module": "chatbot"})
 
 
 class ChatIntent(BaseModel):
@@ -143,6 +157,7 @@ def extract_command_action(message: str) -> Optional[str]:
     return _cue_match(message, _ACTION_CUES)
 
 
+@traceable(name="classify_intent", run_type="llm")
 def classify_intent(llm, message: str, item_name: str) -> ChatIntent:
     prompt = (
         f"A shop owner sent this message about \"{item_name}\", an item currently flagged "
@@ -201,6 +216,7 @@ def plain_facts(item_id: str, consumption: dict, context: dict) -> str:
     return "\n".join(lines)
 
 
+@traceable(name="answer_question", run_type="llm")
 def answer_question(llm, message: str, item_id: str, consumption: dict, context: dict) -> str:
     facts = plain_facts(item_id, consumption, context)
     prompt = (
@@ -223,6 +239,7 @@ def c_name(consumption: dict, item_id: str) -> str:
     return consumption[item_id]["item_name"]
 
 
+@traceable(name="respond", run_type="chain")
 def respond(llm, message: str, consumption: dict, context: dict) -> dict:
     """
     The single entry point. Returns one of:

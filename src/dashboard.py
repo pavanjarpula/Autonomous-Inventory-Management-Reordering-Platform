@@ -13,6 +13,9 @@ feedback_agent.submit_feedback(), which is where the real per-item logic
 
 Defaults to CACHED model responses (data/demo_llm_cache.json, built by
 record_demo_cache.py) so the walkthrough never depends on a live call.
+
+LangSmith integration: each graph run includes metadata for tracing.
+Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY to enable tracing.
 """
 
 import sys
@@ -29,6 +32,7 @@ from feedback_agent import REASON_CODES, default_parameters, submit_feedback
 from graph import build_graph
 from llm_cache import CachedLLM
 from llm_provider import available_providers, make_llm
+from logger import get_logger
 from store import (
     empty_feedback_log,
     load_feedback_log,
@@ -36,6 +40,8 @@ from store import (
     save_feedback_log,
     save_parameters,
 )
+
+logger = get_logger(__name__, extra_data={"module": "dashboard"})
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -189,13 +195,28 @@ def get_llm():
 
 def run_review():
     st.session_state.review_error = None
+    try:
+        from langsmith import RunnableConfig
+        tracing_config = RunnableConfig(
+            tags=["dashboard", f"date-{as_of.date()}"],
+            metadata={
+                "provider": live_provider if live_provider else "cached",
+                "n_items": len(d["items"]),
+                "run_type": "dashboard_review",
+            }
+        )
+    except ImportError:
+        tracing_config = None
+    
     graph = build_graph(d["sales"], d["items"], d["suppliers"], d["festival_calendar"],
                          d["festival_overrides"], d["promotions"], get_llm(),
                          params_by_item=st.session_state.params_by_item,
                          purchase_orders=d["purchase_orders"])
-    config = {"configurable": {"thread_id": f"dashboard-{as_of.date()}-{n_logged}"}}
+    thread_config = {"configurable": {"thread_id": f"dashboard-{as_of.date()}"}}
+    if tracing_config:
+        thread_config.update(tracing_config)
     try:
-        result = graph.invoke({"as_of_date": str(as_of.date())}, config)
+        result = graph.invoke({"as_of_date": str(as_of.date())}, thread_config)
         st.session_state.recommendations = result["__interrupt__"][0].value["recommendations"]
         st.session_state.total_flagged = result["total_flagged_count"]
         st.session_state.decided = {}
