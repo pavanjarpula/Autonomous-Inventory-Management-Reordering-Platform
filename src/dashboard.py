@@ -413,13 +413,12 @@ if section == "Ask":
         with st.chat_message("user"):
             st.write(question)
 
-        flagged = {a["item_id"]: a for a in assessments if a["risk"] != "healthy"}
+        all_items = {a["item_id"]: a for a in assessments}
         context = {iid: get_context(iid, as_of, d["items"], d["festival_calendar"],
-                                     d["festival_overrides"], d["promotions"]) for iid in flagged}
+                                     d["festival_overrides"], d["promotions"]) for iid in all_items}
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
-                result = (respond(get_llm(), question, flagged, context) if flagged
-                          else dict(text="Nothing is flagged for this date."))
+                result = respond(get_llm(), question, all_items, context)
             st.write(result["text"])
         st.session_state.chat_messages.append(("assistant", result["text"]))
 

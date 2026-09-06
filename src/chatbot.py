@@ -56,6 +56,19 @@ _MEASUREMENT = re.compile(r"^\d+(\.\d+)?(g|kg|ml|l|gm|ltr)$")
 _GENERIC_TOKENS = {"pack", "set", "box", "small", "large", "of", "and", "assorted"}
 
 
+def _stem(word: str) -> str:
+    """Minimal stemmer: strip trailing 's', 'es', 'ies' so 'biscuit' matches
+    'biscuits', 'battery' matches 'batteries'. Not a real stemmer -- just
+    enough for the 25 item names in this dataset."""
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3]
+    if word.endswith("es") and len(word) > 3:
+        return word[:-2]
+    if word.endswith("s") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
 def _content_tokens(name: str) -> set[str]:
     """The words in an item name that actually identify it. Drops sizes ("150g",
     "5kg") and generic packaging words ("pack", "set", "box") -- nobody asks
@@ -63,7 +76,7 @@ def _content_tokens(name: str) -> set[str]:
     own points at three different items."""
     tokens = re.findall(r"[a-z0-9]+", name.lower())
     return {
-        t for t in tokens
+        _stem(t) for t in tokens
         if t not in _GENERIC_TOKENS and not _MEASUREMENT.match(t) and not t.isdigit()
     }
 
@@ -78,7 +91,7 @@ def resolve_item_id(message: str, consumption: dict) -> Optional[str]:
     never a guess -- when nothing matches, or when two items tie (a bare "gift"
     could mean either the Gift Hamper or the Sweets Gift Box).
     """
-    words = set(re.findall(r"[a-z0-9]+", message.lower()))
+    words = {_stem(w) for w in re.findall(r"[a-z0-9]+", message.lower())}
 
     for item_id in consumption:
         if item_id.lower() in words:
