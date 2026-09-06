@@ -13,8 +13,8 @@ pytest>=8.2,<9.0
 # LLM providers — install at least one.
 # Ollama is local-only: it is NOT reachable from a deployed container, so a
 # hosted API is required for anything beyond running on your own machine.
-langchain-ollama>=0.2,<0.4        # local dev; needs `ollama serve` on the same host
-# langchain-groq>=0.2,<0.4        # GROQ_API_KEY   — fastest, generous free tier
+# langchain-ollama>=0.2,<0.4        # local dev; needs `ollama serve` on the same host
+langchain-groq>=0.2,<0.4        # GROQ_API_KEY   — fastest, generous free tier
 # langchain-google-genai>=2.0,<3  # GOOGLE_API_KEY — free tier
 # langchain-openai>=0.2,<0.4      # OPENAI_API_KEY — paid
 
