@@ -20,6 +20,18 @@ breaking import for everyone else.
 import os
 from dataclasses import dataclass
 
+
+def _get_secret(key: str) -> str | None:
+    """Check os.environ first, then Streamlit secrets (for cloud deployment)."""
+    val = os.environ.get(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key)
+    except Exception:
+        return None
+
 # model choices are per-provider defaults, overridable via SELLERSENSE_LLM_MODEL
 PROVIDERS = {
     "groq":     dict(env_key="GROQ_API_KEY",   package="langchain_groq",         default_model="llama-3.3-70b-versatile"),
@@ -56,7 +68,7 @@ def provider_status(name: str) -> ProviderStatus:
         package_installed=_package_installed(spec["package"]),
         # Ollama needs no key; whether it's actually running is only knowable by
         # calling it, which callers already handle by catching the failure
-        key_present=True if spec["env_key"] is None else bool(os.environ.get(spec["env_key"])),
+        key_present=True if spec["env_key"] is None else bool(_get_secret(spec["env_key"])),
     )
 
 
@@ -102,13 +114,16 @@ def make_llm(provider: str | None = None, model: str | None = None, temperature:
 
     if name == "groq":
         from langchain_groq import ChatGroq
-        return ChatGroq(model=model, temperature=temperature)
+        api_key = _get_secret("GROQ_API_KEY")
+        return ChatGroq(model=model, temperature=temperature, groq_api_key=api_key)
     if name == "google":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model=model, temperature=temperature)
+        api_key = _get_secret("GOOGLE_API_KEY")
+        return ChatGoogleGenerativeAI(model=model, temperature=temperature, google_api_key=api_key)
     if name == "openai":
         from langchain_openai import ChatOpenAI
-        return ChatOpenAI(model=model, temperature=temperature)
+        api_key = _get_secret("OPENAI_API_KEY")
+        return ChatOpenAI(model=model, temperature=temperature, openai_api_key=api_key)
     if name == "ollama":
         from langchain_ollama import ChatOllama
         # base_url is settable for a remote Ollama (a tunnel, or a GPU box);

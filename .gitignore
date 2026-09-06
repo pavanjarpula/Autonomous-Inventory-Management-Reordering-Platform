@@ -27,7 +27,6 @@ Thumbs.db
 # Generated at runtime — not source-controlled
 data/feedback_log.csv
 data/seller_parameters.csv
-data/backtest_results.csv
 data/demo_llm_cache.json
 
 # Streamlit

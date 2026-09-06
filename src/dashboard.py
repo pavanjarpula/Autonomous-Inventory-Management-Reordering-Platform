@@ -440,16 +440,16 @@ if section == "Evidence":
             stockout_days=("stockout_days", "sum"),
             fill_rate=("fill_rate", "mean"),
             capital=("avg_capital_tied_up", "sum"),
-        ).round(3).reindex(["actual", "plain_rop", "context_aware"])
+        ).round(3).reindex(["seller", "plain_rop", "context_aware"])
 
-        label = {"actual": "What the seller actually did",
+        label = {"seller": "What the seller actually did",
                  "plain_rop": "Textbook reorder point",
                  "context_aware": "SellerSense"}
         c1, c2, c3 = st.columns(3)
         for col, policy in zip((c1, c2, c3), summary.index):
-            base = summary.loc["actual"]
+            base = summary.loc["seller"]
             row = summary.loc[policy]
-            delta = None if policy == "actual" else f"{int(row.stockout_days - base.stockout_days):+d} vs actual"
+            delta = None if policy == "seller" else f"{int(row.stockout_days - base.stockout_days):+d} vs seller"
             col.metric(label[policy], f"{int(row.stockout_days)} stockout days", delta=delta,
                        delta_color="inverse")
 
@@ -470,11 +470,11 @@ if section == "Evidence":
                     "fewer stockouts, higher fill rate, and less cash tied up. Against the textbook "
                     "reorder point it trades capital for availability, which is the intended trade.")
 
-        umbrella = bt[bt.item_name == "Umbrella"].set_index("policy")["fill_rate"]
-        if {"plain_rop", "context_aware"} <= set(umbrella.index):
-            st.info(f"Clearest single case — Umbrella through the monsoon: a textbook reorder point "
-                    f"never caught up and finished at a {umbrella['plain_rop']:.3f} fill rate, "
-                    f"against {umbrella['context_aware']:.3f} with the seasonal signal.")
+        raincoat = bt[bt.item_name == "Raincoat"].set_index("policy")["fill_rate"]
+        if {"plain_rop", "context_aware"} <= set(raincoat.index):
+            st.info(f"Clearest single case — Raincoat through the monsoon: a textbook reorder point "
+                    f"never caught up and finished at a {raincoat['plain_rop']:.3f} fill rate, "
+                    f"against {raincoat['context_aware']:.3f} with the seasonal signal.")
 
 
 # ---------------------------------------------------------------- activity
