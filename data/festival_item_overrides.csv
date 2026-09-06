@@ -1,0 +1,6 @@
+festival_name,item_id,uplift_multiplier,exclusive
+Holi,I017,15.0,True
+Raksha Bandhan,I016,14.0,True
+Diwali,I014,6.0,False
+Diwali,I015,5.0,False
+Diwali,I018,4.5,False

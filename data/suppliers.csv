@@ -1,0 +1,6 @@
+supplier_id,supplier_name,mean_lead_time_days,lead_time_std_days
+S1,Shree Grocers Wholesale,4,0.8
+S2,Metro FMCG Distributors,6,1.2
+S3,TechBazaar Accessories,8,2.0
+S4,Utsav Festive Supplies,6,3.5
+S5,Bharat Home Essentials,11,1.5
