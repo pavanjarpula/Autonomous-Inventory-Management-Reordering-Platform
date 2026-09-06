@@ -4,7 +4,7 @@ Enhanced Human-in-the-Loop (HITL) patterns for SellerSense.
 Implements:
 1. Per-item interrupts for independent approve/reject decisions
 2. Auto-approval for low-risk items based on confidence thresholds
-3. WhatsApp notification via Twilio (optional)
+3. WhatsApp/SMS notification via Twilio
 
 LangSmith: all operations are traceable via @traceable decorators.
 """
@@ -28,6 +28,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from logger import get_logger
 
 logger = get_logger(__name__, extra_data={"module": "hitl"})
+
+
+def _get_secret(key: str) -> str | None:
+    """Check os.environ first, then Streamlit secrets (for cloud deployment)."""
+    val = os.environ.get(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key)
+    except Exception:
+        return None
 
 
 # ---- Auto-approval Thresholds ----
@@ -147,15 +159,17 @@ class AutoApprovalEngine:
         }
 
 
-# ---- WhatsApp Notifications ----
+# ---- WhatsApp/SMS Notifications ----
 
 class WhatsAppNotifier:
     """
-    Send WhatsApp notifications via Twilio (optional).
+    Send WhatsApp/SMS notifications via Twilio.
+    
+    Supports both WhatsApp and SMS channels.
     
     Requires:
         pip install twilio
-        TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM
+        TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM (or TWILIO_SMS_FROM)
     """
 
     def __init__(
@@ -164,13 +178,13 @@ class WhatsAppNotifier:
         auth_token: str | None = None,
         from_number: str | None = None,
     ):
-        self.account_sid = account_sid or os.environ.get("TWILIO_ACCOUNT_SID")
-        self.auth_token = auth_token or os.environ.get("TWILIO_AUTH_TOKEN")
-        self.from_number = from_number or os.environ.get("TWILIO_WHATSAPP_FROM")
+        self.account_sid = account_sid or _get_secret("TWILIO_ACCOUNT_SID")
+        self.auth_token = auth_token or _get_secret("TWILIO_AUTH_TOKEN")
+        self.from_number = from_number or _get_secret("TWILIO_WHATSAPP_FROM")
 
     @property
     def available(self) -> bool:
-        """Check if WhatsApp notifications are configured."""
+        """Check if notifications are configured."""
         return bool(self.account_sid and self.auth_token and self.from_number)
 
     @traceable(name="send_whatsapp", run_type="chain")
@@ -178,13 +192,15 @@ class WhatsAppNotifier:
         self,
         to_number: str,
         message: str,
+        channel: str = "whatsapp",
     ) -> dict:
         """
-        Send a WhatsApp notification.
+        Send a notification via WhatsApp or SMS.
         
         Args:
-            to_number: Recipient phone number (with country code)
+            to_number: Recipient phone number (with country code, e.g., "+916304595065")
             message: Message text
+            channel: "whatsapp" or "sms"
         
         Returns:
             Dict with keys: success (bool), message_sid (str), error (str)
@@ -192,34 +208,59 @@ class WhatsAppNotifier:
         if not self.available:
             return {
                 "success": False,
-                "error": "WhatsApp not configured",
+                "error": "Twilio not configured",
             }
 
         try:
             from twilio.rest import Client
             client = Client(self.account_sid, self.auth_token)
 
+            # Format the 'from' number based on channel
+            if channel == "whatsapp":
+                from_addr = f"whatsapp:{self.from_number}"
+                to_addr = f"whatsapp:{to_number}"
+            else:
+                from_addr = self.from_number
+                to_addr = to_number
+
             msg = client.messages.create(
-                from_=f"whatsapp:{self.from_number}",
-                to=f"whatsapp:{to_number}",
+                from_=from_addr,
+                to=to_addr,
                 body=message,
             )
+
+            logger.info("Notification sent", extra={"extra_data": {
+                "channel": channel,
+                "to": to_number,
+                "message_sid": msg.sid,
+            }})
 
             return {
                 "success": True,
                 "message_sid": msg.sid,
+                "channel": channel,
             }
 
         except ImportError:
             return {
                 "success": False,
-                "error": "twilio package not installed",
+                "error": "twilio package not installed: pip install twilio",
             }
         except Exception as e:
+            logger.error(f"Notification failed: {e}")
             return {
                 "success": False,
                 "error": str(e),
             }
+
+    @traceable(name="send_sms", run_type="chain")
+    def send_sms(
+        self,
+        to_number: str,
+        message: str,
+    ) -> dict:
+        """Send SMS notification (convenience method)."""
+        return self.send_notification(to_number, message, channel="sms")
 
     @traceable(name="send_daily_summary", run_type="chain")
     def send_daily_summary(
@@ -228,15 +269,17 @@ class WhatsAppNotifier:
         recommendations: list[dict],
         auto_approved: list[dict],
         needs_review: list[dict],
+        channel: str = "whatsapp",
     ) -> dict:
         """
-        Send a daily inventory summary via WhatsApp.
+        Send a daily inventory summary.
         
         Args:
             to_number: Recipient phone number
             recommendations: All recommendations
             auto_approved: Auto-approved items
             needs_review: Items needing review
+            channel: "whatsapp" or "sms"
         
         Returns:
             Dict with keys: success (bool), error (str)
@@ -272,7 +315,41 @@ class WhatsAppNotifier:
         lines.append(f"_Open dashboard to review: {len(needs_review)} items need attention_")
 
         message = "\n".join(lines)
-        return self.send_notification(to_number, message)
+        return self.send_notification(to_number, message, channel=channel)
+
+    @traceable(name="send_recommendation_alert", run_type="chain")
+    def send_recommendation_alert(
+        self,
+        to_number: str,
+        recommendation: dict,
+        channel: str = "whatsapp",
+    ) -> dict:
+        """
+        Send an alert for a single high-priority recommendation.
+        
+        Args:
+            to_number: Recipient phone number
+            recommendation: Single recommendation dict
+            channel: "whatsapp" or "sms"
+        
+        Returns:
+            Dict with keys: success (bool), error (str)
+        """
+        item_name = recommendation.get("item_name", "Unknown Item")
+        urgency = recommendation.get("urgency", "medium")
+        qty = recommendation.get("suggested_order_qty", 0)
+        risk = recommendation.get("risk", "unknown")
+
+        message = (
+            f"*SellerSense Alert*\n\n"
+            f"*{item_name}* needs attention!\n"
+            f"Risk: {risk}\n"
+            f"Urgency: {urgency}\n"
+            f"Suggested order: {qty} units\n\n"
+            f"_Open dashboard to review this recommendation._"
+        )
+
+        return self.send_notification(to_number, message, channel=channel)
 
 
 # ---- Per-item Interrupt Pattern ----
