@@ -12,6 +12,10 @@ pydantic>=2.7,<3.0
 streamlit>=1.38,<2.0
 pytest>=8.2,<9.0
 
+# RAG (Phase 3) - FAISS vector store + embeddings
+faiss-cpu>=1.7,<2.0
+sentence-transformers>=2.2,<4.0
+
 # LLM providers — install at least one.
 # Ollama is local-only: it is NOT reachable from a deployed container, so a
 # hosted API is required for anything beyond running on your own machine.
