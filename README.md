@@ -151,12 +151,12 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    REJECT[Reject: "qty too high"] --> LOG1[Rejection #1<br/>streak = 1<br/>no change]
-    LOG1 --> REJECT2[Reject: "qty too high"]
+    REJECT[Reject: qty too high] --> LOG1[Rejection #1<br/>streak = 1<br/>no change]
+    LOG1 --> REJECT2[Reject: qty too high]
     REJECT2 --> LOG2[Rejection #2<br/>streak = 2<br/>no change]
-    LOG2 --> REJECT3[Reject: "qty too high"]
+    LOG2 --> REJECT3[Reject: qty too high]
     REJECT3 --> LOG3[Rejection #3<br/>streak = 3]
-    LOG3 --> ADJUST[z: 1.65 → 1.50<br/>lower safety factor]
+    LOG3 --> ADJUST[z: 1.65 to 1.50<br/>lower safety factor]
     ADJUST --> NEXT[Next recommendation<br/>uses new z]
     
     style LOG3 fill:#ff9800
