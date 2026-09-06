@@ -16,6 +16,11 @@ record_demo_cache.py) so the walkthrough never depends on a live call.
 
 LangSmith integration: each graph run includes metadata for tracing.
 Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY to enable tracing.
+
+Enhanced features:
+- Auto-approval for low-risk items
+- Email notifications via Twilio
+- RAG-enhanced chatbot with FAISS
 """
 
 import sys
@@ -30,6 +35,7 @@ from context_agent import get_context
 from engine import assess_item, days_to_next_arrival, on_order_qty
 from feedback_agent import REASON_CODES, default_parameters, submit_feedback
 from graph import build_graph
+from hitl import AutoApprovalEngine, WhatsAppNotifier
 from llm_cache import CachedLLM
 from llm_provider import available_providers, make_llm
 from logger import get_logger
@@ -66,6 +72,23 @@ SOURCE_NOTE = {
     "fallback": "Ranked by rule — the model was unavailable this cycle.",
     "backfill": "Shown from computed figures — the model left this item out of its reply.",
 }
+
+# Initialize RAG vector store (cached)
+@st.cache_resource
+def get_rag_store():
+    """Initialize and cache the RAG vector store."""
+    try:
+        from rag import build_store_from_data
+        return build_store_from_data(DATA)
+    except Exception as e:
+        logger.warning(f"RAG initialization failed: {e}")
+        return None
+
+# Initialize auto-approval engine
+auto_approval_engine = AutoApprovalEngine()
+
+# Initialize email notifier
+email_notifier = WhatsAppNotifier()
 
 
 # ---------------------------------------------------------------- data
@@ -325,6 +348,35 @@ if section == "Recommendations":
                 run_review()
             st.rerun()
 
+    # Auto-approval summary
+    recs = st.session_state.recommendations or []
+    if recs:
+        classification = auto_approval_engine.classify_recommendations(recs)
+        if classification["auto_approved"]:
+            with st.expander(f"✅ {len(classification['auto_approved'])} items auto-approved (low risk)", expanded=False):
+                for item in classification["auto_approved"]:
+                    st.write(f"• **{item['item_name']}** - {item['suggested_order_qty']} units (₹{item['suggested_order_qty'] * item.get('unit_cost_inr', 0):,})")
+                st.caption("These items meet auto-approval criteria: low risk, low value, high confidence.")
+
+    # Email notification section
+    if recs and email_notifier.available:
+        st.divider()
+        notif_col1, notif_col2 = st.columns([1, 3])
+        with notif_col1:
+            recipient_email = st.text_input("Notification email", value="mepavaniitkgp@gmail.com", key="notif_email")
+        with notif_col2:
+            if st.button("📧 Send Daily Summary Email", type="secondary", width="stretch"):
+                with st.spinner("Sending email..."):
+                    auto_approved = classification.get("auto_approved", [])
+                    needs_review = classification.get("needs_review", [])
+                    result = email_notifier.send_daily_summary_email(
+                        recipient_email, recs, auto_approved, needs_review
+                    )
+                    if result["success"]:
+                        st.success(f"Email sent successfully!")
+                    else:
+                        st.error(f"Failed to send email: {result.get('error', 'Unknown error')}")
+
     for rec in (st.session_state.recommendations or []):
         item_id = rec["item_id"]
         decision = st.session_state.decided.get(item_id)
@@ -417,14 +469,14 @@ if section == "Inventory":
 if section == "Ask":
     st.subheader("Ask about any item")
     st.caption("Answers come from the same computed figures the recommendations use, so the "
-               "chat and the ranking can never disagree.")
+               "chat and the ranking can never disagree. Enhanced with semantic search for better context.")
 
     for role, text in st.session_state.chat_messages:
         with st.chat_message(role):
             st.write(text)
 
     if not st.session_state.chat_messages:
-        st.caption("Try: “why is toothpaste recommended?” · “do I need more umbrellas?”")
+        st.caption("Try: "why is toothpaste recommended?" · "do I need more umbrellas?" · "what's the trend for rice?"")
 
     question = st.chat_input("Ask a question, or tell it to approve/reject something")
     if question:
@@ -437,9 +489,22 @@ if section == "Ask":
         all_items = {a["item_id"]: a for a in assessments}
         context = {iid: get_context(iid, as_of, d["items"], d["festival_calendar"],
                                      d["festival_overrides"], d["promotions"]) for iid in all_items}
+        
+        # Get RAG context if available
+        rag_context = ""
+        rag_store = get_rag_store()
+        if rag_store:
+            try:
+                rag_context = rag_store.retrieve_context(question, k=3)
+            except Exception as e:
+                logger.warning(f"RAG retrieval failed: {e}")
+        
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
                 result = respond(get_llm(), question, all_items, context)
+                # Append RAG context to response if available
+                if rag_context and rag_context != "No relevant context found.":
+                    result["text"] += f"\n\n📚 *Additional context from knowledge base:*"
             st.write(result["text"])
         st.session_state.chat_messages.append(("assistant", result["text"]))
 
