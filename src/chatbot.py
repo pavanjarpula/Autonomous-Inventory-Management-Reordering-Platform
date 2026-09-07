@@ -125,6 +125,13 @@ _ACTION_CUES = {
     "snooze": ("snooze", "later", "remind me", "not now", "tomorrow"),
 }
 
+_QUESTION_CUES = (
+    "why", "what", "how", "when", "where", "which", "who",
+    "is it", "are they", "do i", "should i", "can i",
+    "tell me", "explain", "show me", "help me",
+    "recommended", "flagged", "low stock", "running out",
+)
+
 _REASON_CUES = {
     "qty_too_high": ("too high", "too many", "too much", "fewer", "less than", "reduce", "lower the qty"),
     "qty_too_low": ("too low", "too few", "not enough", "more than that", "increase"),
@@ -159,6 +166,27 @@ def extract_command_action(message: str) -> Optional[str]:
 
 @traceable(name="classify_intent", run_type="llm")
 def classify_intent(llm, message: str, item_name: str) -> ChatIntent:
+    # Deterministic check for common question patterns first
+    lowered = message.lower().strip()
+    
+    # Check for question words at the start
+    if any(lowered.startswith(q) for q in ("why", "what", "how", "when", "where", "which")):
+        return ChatIntent(kind="question")
+    
+    # Check for question patterns
+    if any(cue in lowered for cue in _QUESTION_CUES):
+        return ChatIntent(kind="question")
+    
+    # Check for explicit question mark
+    if "?" in message:
+        return ChatIntent(kind="question")
+    
+    # Check for command patterns first
+    action = extract_command_action(message)
+    if action:
+        return ChatIntent(kind="command", command_action=action)
+    
+    # Fall back to LLM classification
     prompt = (
         f"A shop owner sent this message about \"{item_name}\", an item currently flagged "
         "by their inventory copilot. Classify it.\n"
