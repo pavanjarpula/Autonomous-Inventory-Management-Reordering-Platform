@@ -476,7 +476,7 @@ if section == "Ask":
             st.write(text)
 
     if not st.session_state.chat_messages:
-        st.caption("Try: "why is toothpaste recommended?" · "do I need more umbrellas?" · "what's the trend for rice?"")
+        st.caption('Try: "why is toothpaste recommended?" · "do I need more umbrellas?" · "what\'s the trend for rice?"')
 
     question = st.chat_input("Ask a question, or tell it to approve/reject something")
     if question:
