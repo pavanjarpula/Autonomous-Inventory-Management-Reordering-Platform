@@ -521,7 +521,29 @@ if section == "Ask":
         
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
+                # Explicit LangSmith tracing via Client API
+                _run_id = None
+                try:
+                    from langsmith import Client as LSClient
+                    _ls = LSClient()
+                    _run = _ls.create_run(
+                        name="chat_question",
+                        run_type="chain",
+                        inputs={"question": question},
+                        project_name=os.environ.get("LANGCHAIN_PROJECT", "sellersense"),
+                    )
+                    _run_id = _run.id
+                except Exception as _ls_err:
+                    logger.warning(f"LangSmith trace create failed: {_ls_err}")
+
                 result = respond(get_llm(), question, all_items, context)
+
+                if _run_id:
+                    try:
+                        _ls.update_run(_run_id, outputs={"answer": result.get("text", "")[:200]})
+                    except Exception:
+                        pass
+
                 # Append RAG context to response if available
                 if rag_context and rag_context != "No relevant context found.":
                     result["text"] += f"\n\n📚 *Additional context from knowledge base:*"
