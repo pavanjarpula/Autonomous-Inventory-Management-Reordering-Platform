@@ -32,15 +32,21 @@ import streamlit as st
 
 # Push LangSmith secrets from Streamlit Cloud into os.environ so
 # langsmith.traceable picks them up at import / run time.
+_langsmith_api_key = None
 for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT",
            "LANGCHAIN_ENDPOINT", "LANGCHAIN_CALLBACKS"):
     if _k not in os.environ:
         try:
             os.environ[_k] = st.secrets[_k]
+        except KeyError:
+            pass
         except Exception:
             pass
+    if _k == "LANGCHAIN_API_KEY":
+        _langsmith_api_key = os.environ.get(_k)
 # Also handle lowercase / mixed-case variants some SDK versions check
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+os.environ.setdefault("LANGCHAIN_PROJECT", "sellersense")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chatbot import respond
@@ -209,8 +215,11 @@ as_of = pd.Timestamp(st.sidebar.date_input(
 ))
 
 st.sidebar.divider()
-if _langsmith_ok:
-    st.sidebar.success("LangSmith tracing active")
+if _langsmith_ok and _langsmith_api_key:
+    masked = _langsmith_api_key[:10] + "..." + _langsmith_api_key[-4:]
+    st.sidebar.success(f"LangSmith tracing active ({masked})")
+elif _langsmith_ok:
+    st.sidebar.success("LangSmith tracing active (key set)")
 else:
     st.sidebar.warning("LangSmith tracing off")
 n_logged = len(st.session_state.feedback_log)
