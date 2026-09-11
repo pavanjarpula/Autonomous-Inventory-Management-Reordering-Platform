@@ -31,3 +31,6 @@ data/demo_llm_cache.json
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Environment secrets
+.env
