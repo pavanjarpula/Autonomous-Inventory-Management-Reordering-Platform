@@ -32,12 +32,15 @@ import streamlit as st
 
 # Push LangSmith secrets from Streamlit Cloud into os.environ so
 # langsmith.traceable picks them up at import / run time.
-for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT"):
+for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT",
+           "LANGCHAIN_ENDPOINT", "LANGCHAIN_CALLBACKS"):
     if _k not in os.environ:
         try:
             os.environ[_k] = st.secrets[_k]
         except Exception:
             pass
+# Also handle lowercase / mixed-case variants some SDK versions check
+os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chatbot import respond
@@ -70,6 +73,9 @@ STORE_NAME = "Meera General Store"
 STORE_SUBTITLE = "Single storefront · 25 SKUs · 5 suppliers"
 
 st.set_page_config(page_title="SellerSense", page_icon="📦", layout="wide")
+
+# Verify LangSmith env vars are set
+_langsmith_ok = all(os.environ.get(k) for k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2"))
 
 RISK_LABEL = {"stockout_risk": "At risk", "overstock": "Overstocked", "healthy": "Healthy"}
 RISK_SORT_ORDER = {"stockout_risk": 0, "overstock": 1, "healthy": 2}
@@ -203,6 +209,10 @@ as_of = pd.Timestamp(st.sidebar.date_input(
 ))
 
 st.sidebar.divider()
+if _langsmith_ok:
+    st.sidebar.success("LangSmith tracing active")
+else:
+    st.sidebar.warning("LangSmith tracing off")
 n_logged = len(st.session_state.feedback_log)
 st.sidebar.caption(f"{n_logged} decision(s) on record" if n_logged else "No decisions recorded yet")
 if st.sidebar.button("Reset feedback history", disabled=not n_logged, width="stretch"):
