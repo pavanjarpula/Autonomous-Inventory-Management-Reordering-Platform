@@ -45,6 +45,13 @@ for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT",
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
 os.environ.setdefault("LANGCHAIN_PROJECT", "sellersense")
 
+# Explicitly configure LangSmith client so @traceable auto-tracing works
+try:
+    from langsmith import Client as _LSClient
+    _ls_client = _LSClient()
+except Exception:
+    _ls_client = None
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chatbot import respond
 from context_agent import get_context
