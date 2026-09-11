@@ -48,7 +48,7 @@ os.environ.setdefault("LANGCHAIN_PROJECT", "sellersense")
 # Explicitly configure LangSmith client so @traceable auto-tracing works
 try:
     from langsmith import Client as _LSClient
-    _ls_client = _LSClient()
+    _ls_client = _LSClient(auto_batch_tracing=False)
 except Exception:
     _ls_client = None
 
@@ -531,30 +531,7 @@ if section == "Ask":
         
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
-                # Explicit LangSmith tracing via Client API
-                _run_id = None
-                _ls_client = None
-                try:
-                    from langsmith import Client as LSClient
-                    _ls_client = LSClient()
-                    _run = _ls_client.create_run(
-                        name="chat_question",
-                        run_type="chain",
-                        inputs={"question": question},
-                        project_name=os.environ.get("LANGCHAIN_PROJECT", "sellersense"),
-                    )
-                    if _run:
-                        _run_id = _run.id
-                except Exception as _ls_err:
-                    logger.warning(f"LangSmith trace create failed: {_ls_err}")
-
                 result = respond(get_llm(), question, all_items, context)
-
-                if _run_id and _ls_client:
-                    try:
-                        _ls_client.update_run(_run_id, outputs={"answer": result.get("text", "")[:200]})
-                    except Exception:
-                        pass
 
                 # Append RAG context to response if available
                 if rag_context and rag_context != "No relevant context found.":
