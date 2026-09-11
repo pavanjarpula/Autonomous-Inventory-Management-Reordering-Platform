@@ -23,11 +23,21 @@ Enhanced features:
 - RAG-enhanced chatbot with FAISS
 """
 
+import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+# Push LangSmith secrets from Streamlit Cloud into os.environ so
+# langsmith.traceable picks them up at import / run time.
+for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT"):
+    if _k not in os.environ:
+        try:
+            os.environ[_k] = st.secrets[_k]
+        except Exception:
+            pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chatbot import respond
