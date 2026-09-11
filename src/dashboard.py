@@ -32,7 +32,6 @@ import streamlit as st
 
 # Push LangSmith secrets from Streamlit Cloud into os.environ so
 # langsmith.traceable picks them up at import / run time.
-_langsmith_api_key = None
 for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT",
            "LANGCHAIN_ENDPOINT", "LANGCHAIN_CALLBACKS"):
     if _k not in os.environ:
@@ -42,8 +41,6 @@ for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT",
             pass
         except Exception:
             pass
-    if _k == "LANGCHAIN_API_KEY":
-        _langsmith_api_key = os.environ.get(_k)
 # Also handle lowercase / mixed-case variants some SDK versions check
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
 os.environ.setdefault("LANGCHAIN_PROJECT", "sellersense")
@@ -215,11 +212,8 @@ as_of = pd.Timestamp(st.sidebar.date_input(
 ))
 
 st.sidebar.divider()
-if _langsmith_ok and _langsmith_api_key:
-    masked = _langsmith_api_key[:10] + "..." + _langsmith_api_key[-4:]
-    st.sidebar.success(f"LangSmith tracing active ({masked})")
-elif _langsmith_ok:
-    st.sidebar.success("LangSmith tracing active (key set)")
+if _langsmith_ok:
+    st.sidebar.success("LangSmith tracing active")
 else:
     st.sidebar.warning("LangSmith tracing off")
 n_logged = len(st.session_state.feedback_log)
@@ -532,24 +526,26 @@ if section == "Ask":
             with st.spinner("Thinking…"):
                 # Explicit LangSmith tracing via Client API
                 _run_id = None
+                _ls_client = None
                 try:
                     from langsmith import Client as LSClient
-                    _ls = LSClient()
-                    _run = _ls.create_run(
+                    _ls_client = LSClient()
+                    _run = _ls_client.create_run(
                         name="chat_question",
                         run_type="chain",
                         inputs={"question": question},
                         project_name=os.environ.get("LANGCHAIN_PROJECT", "sellersense"),
                     )
-                    _run_id = _run.id
+                    if _run:
+                        _run_id = _run.id
                 except Exception as _ls_err:
                     logger.warning(f"LangSmith trace create failed: {_ls_err}")
 
                 result = respond(get_llm(), question, all_items, context)
 
-                if _run_id:
+                if _run_id and _ls_client:
                     try:
-                        _ls.update_run(_run_id, outputs={"answer": result.get("text", "")[:200]})
+                        _ls_client.update_run(_run_id, outputs={"answer": result.get("text", "")[:200]})
                     except Exception:
                         pass
 
