@@ -372,9 +372,9 @@ if section == "Recommendations":
     recs = st.session_state.recommendations or []
     if recs:
         classification = auto_approval_engine.classify_recommendations(recs)
-        if classification["auto_approved"]:
-            with st.expander(f"✅ {len(classification['auto_approved'])} items auto-approved (low risk)", expanded=False):
-                for item in classification["auto_approved"]:
+        if classification.get("auto_approve"):
+            with st.expander(f"✅ {len(classification['auto_approve'])} items auto-approved (low risk)", expanded=False):
+                for item in classification["auto_approve"]:
                     st.write(f"• **{item['item_name']}** - {item['suggested_order_qty']} units (₹{item['suggested_order_qty'] * item.get('unit_cost_inr', 0):,})")
                 st.caption("These items meet auto-approval criteria: low risk, low value, high confidence.")
 
@@ -387,7 +387,7 @@ if section == "Recommendations":
         with notif_col2:
             if st.button("📧 Send Daily Summary Email", type="secondary", width="stretch"):
                 with st.spinner("Sending email..."):
-                    auto_approved = classification.get("auto_approved", [])
+                    auto_approved = classification.get("auto_approve", [])
                     needs_review = classification.get("needs_review", [])
                     result = email_notifier.send_daily_summary_email(
                         recipient_email, recs, auto_approved, needs_review
