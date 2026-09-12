@@ -130,8 +130,8 @@ flowchart TB
     end
 
     subgraph OBSERVE["Observability — logger.py + LangSmith"]
-        STRUCTURED[Structured Logging<br/>JSON format]
-        TRACING[LangSmith Tracing<br/>trace_run() nested spans]
+        STRUCTURED["Structured Logging<br/>JSON format"]
+        TRACING["LangSmith Tracing<br/>trace_run nested spans"]
     end
 
     SALES --> ENGINE
