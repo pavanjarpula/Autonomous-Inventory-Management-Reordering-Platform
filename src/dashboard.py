@@ -45,13 +45,6 @@ for _k in ("LANGCHAIN_API_KEY", "LANGCHAIN_TRACING_V2", "LANGCHAIN_PROJECT",
 os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
 os.environ.setdefault("LANGCHAIN_PROJECT", "sellersense")
 
-# Explicitly configure LangSmith client so @traceable auto-tracing works
-try:
-    from langsmith import Client as _LSClient
-    _ls_client = _LSClient(auto_batch_tracing=False)
-except Exception:
-    _ls_client = None
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from chatbot import respond
 from context_agent import get_context
@@ -62,6 +55,7 @@ from hitl import AutoApprovalEngine, WhatsAppNotifier
 from llm_cache import CachedLLM
 from llm_provider import available_providers, make_llm
 from logger import get_logger
+from tracing import trace_run
 from store import (
     empty_feedback_log,
     load_feedback_log,
@@ -519,23 +513,57 @@ if section == "Ask":
         all_items = {a["item_id"]: a for a in assessments}
         context = {iid: get_context(iid, as_of, d["items"], d["festival_calendar"],
                                      d["festival_overrides"], d["promotions"]) for iid in all_items}
-        
-        # Get RAG context if available
-        rag_context = ""
-        rag_store = get_rag_store()
-        if rag_store:
-            try:
-                rag_context = rag_store.retrieve_context(question, k=3)
-            except Exception as e:
-                logger.warning(f"RAG retrieval failed: {e}")
-        
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking…"):
-                result = respond(get_llm(), question, all_items, context)
 
-                # Append RAG context to response if available
-                if rag_context and rag_context != "No relevant context found.":
-                    result["text"] += f"\n\n📚 *Additional context from knowledge base:*"
+        with trace_run(
+            "chat_question",
+            run_type="chain",
+            inputs={"question": question, "business_date": str(as_of.date())},
+            metadata={
+                "business_date": str(as_of.date()),
+                "provider": live_provider or "cached",
+                "n_items_assessed": len(all_items),
+                "section": "chat",
+            },
+            tags=["chat", "rag"],
+        ) as top_run:
+            # RAG retrieval
+            rag_context = ""
+            rag_store = get_rag_store()
+            with trace_run(
+                "rag_retrieval",
+                run_type="chain",
+                inputs={"question": question, "k": 3},
+                metadata={"module": "rag", "k": 3},
+                tags=["rag", "vector_search"],
+                parent_run_id=top_run.id,
+            ) as rag_run:
+                if rag_store:
+                    try:
+                        rag_context = rag_store.retrieve_context(question, k=3)
+                        rag_run._extra_outputs = {
+                            "context_length": len(rag_context),
+                            "has_context": bool(rag_context and rag_context != "No relevant context found."),
+                        }
+                    except Exception as e:
+                        logger.warning(f"RAG retrieval failed: {e}")
+                        rag_run._extra_outputs = {"error": str(e)}
+                else:
+                    rag_run._extra_outputs = {"rag_available": False}
+
+            # Chatbot response (respond() creates its own nested children)
+            result = respond(get_llm(), question, all_items, context)
+
+            # Append RAG context to response if available
+            if rag_context and rag_context != "No relevant context found.":
+                result["text"] += f"\n\n📚 *Additional context from knowledge base:*"
+
+            top_run._extra_outputs = {
+                "answer_kind": result.get("kind", ""),
+                "answer_preview": result.get("text", "")[:200],
+                "rag_used": bool(rag_context and rag_context != "No relevant context found."),
+            }
+
+        with st.chat_message("assistant"):
             st.write(result["text"])
         st.session_state.chat_messages.append(("assistant", result["text"]))
 

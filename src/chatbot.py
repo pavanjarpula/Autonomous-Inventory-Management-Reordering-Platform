@@ -18,12 +18,8 @@ act on it can pass it straight through -- but that decision, and the actual
 side effect, stays outside this module. Same rule as every earlier phase: the
 LLM proposes, something else decides.
 
-No retrieval, no embeddings: the whole flagged set plus recent feedback history
-comfortably fits in a prompt at this scale -- a vector index here would be
-complexity with no payoff.
-
-LangSmith integration: all LLM calls are traceable via @traceable decorators.
-Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY to enable tracing.
+LangSmith tracing: uses explicit Client API for nested parent-child traces.
+Set LANGCHAIN_API_KEY and LANGCHAIN_TRACING_V2=true to enable.
 """
 
 import re
@@ -33,13 +29,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
+from tracing import trace_run
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from feedback_agent import REASON_CODES
@@ -164,41 +154,56 @@ def extract_command_action(message: str) -> Optional[str]:
     return _cue_match(message, _ACTION_CUES)
 
 
-@traceable(name="classify_intent", run_type="llm")
-def classify_intent(llm, message: str, item_name: str) -> ChatIntent:
-    # Deterministic check for common question patterns first
-    lowered = message.lower().strip()
-    
-    # Check for question words at the start
-    if any(lowered.startswith(q) for q in ("why", "what", "how", "when", "where", "which")):
-        return ChatIntent(kind="question")
-    
-    # Check for question patterns
-    if any(cue in lowered for cue in _QUESTION_CUES):
-        return ChatIntent(kind="question")
-    
-    # Check for explicit question mark
-    if "?" in message:
-        return ChatIntent(kind="question")
-    
-    # Check for command patterns first
-    action = extract_command_action(message)
-    if action:
-        return ChatIntent(kind="command", command_action=action)
-    
-    # Fall back to LLM classification
-    prompt = (
-        f"A shop owner sent this message about \"{item_name}\", an item currently flagged "
-        "by their inventory copilot. Classify it.\n"
-        "'command' means they're telling the system to DO something right now (approve an "
-        "order, reject a recommendation, snooze it). 'question' means they're asking about "
-        "it. 'unclear' if it's neither.\n\n"
-        f"Message: \"{message}\""
-    )
-    try:
-        return llm.with_structured_output(ChatIntent).invoke(prompt)
-    except Exception:
-        return ChatIntent(kind="unclear")
+def classify_intent(llm, message: str, item_name: str, parent_run_id=None) -> ChatIntent:
+    """Classify whether the seller's message is a question, command, or unclear."""
+    with trace_run(
+        "classify_intent",
+        run_type="llm",
+        inputs={"message": message, "item_name": item_name},
+        metadata={"item_name": item_name, "module": "chatbot"},
+        tags=["llm", "classification"],
+        parent_run_id=parent_run_id,
+    ) as run:
+        # Deterministic check for common question patterns first
+        lowered = message.lower().strip()
+
+        if any(lowered.startswith(q) for q in ("why", "what", "how", "when", "where", "which")):
+            result = ChatIntent(kind="question")
+            run._extra_outputs = {"intent": "question", "method": "deterministic_startswith"}
+            return result
+
+        if any(cue in lowered for cue in _QUESTION_CUES):
+            result = ChatIntent(kind="question")
+            run._extra_outputs = {"intent": "question", "method": "deterministic_cues"}
+            return result
+
+        if "?" in message:
+            result = ChatIntent(kind="question")
+            run._extra_outputs = {"intent": "question", "method": "deterministic_question_mark"}
+            return result
+
+        action = extract_command_action(message)
+        if action:
+            result = ChatIntent(kind="command", command_action=action)
+            run._extra_outputs = {"intent": "command", "action": action, "method": "deterministic_action"}
+            return result
+
+        # Fall back to LLM classification
+        prompt = (
+            f"A shop owner sent this message about \"{item_name}\", an item currently flagged "
+            "by their inventory copilot. Classify it.\n"
+            "'command' means they're telling the system to DO something right now (approve an "
+            "order, reject a recommendation, snooze it). 'question' means they're asking about "
+            "it. 'unclear' if it's neither.\n\n"
+            f"Message: \"{message}\""
+        )
+        try:
+            result = llm.with_structured_output(ChatIntent).invoke(prompt)
+            run._extra_outputs = {"intent": result.kind, "action": result.command_action, "method": "llm"}
+            return result
+        except Exception:
+            run._extra_outputs = {"intent": "unclear", "method": "llm_fallback"}
+            return ChatIntent(kind="unclear")
 
 
 def plain_facts(item_id: str, consumption: dict, context: dict) -> str:
@@ -244,30 +249,51 @@ def plain_facts(item_id: str, consumption: dict, context: dict) -> str:
     return "\n".join(lines)
 
 
-@traceable(name="answer_question", run_type="llm")
-def answer_question(llm, message: str, item_id: str, consumption: dict, context: dict) -> str:
-    facts = plain_facts(item_id, consumption, context)
-    prompt = (
-        "You are an inventory assistant answering a shop owner's question about one item "
-        "in their shop. Answer in one or two short, plain sentences they'd find useful -- "
-        "no jargon, no field names.\n\n"
-        "Use only the facts below and never invent a number. If they're asking whether they "
-        "need to order something, the line about what the system is recommending is the answer. "
-        "If they're asking why something was flagged, explain the reason in the facts (running "
-        "low, a festival driving demand, or selling faster than usual).\n\n"
-        f"Facts:\n{facts}\n\nTheir question: \"{message}\""
-    )
-    try:
-        return llm.with_structured_output(ChatAnswer).invoke(prompt).answer
-    except Exception:
-        return f"Here's what I have on {c_name(consumption, item_id)}:\n{facts}"
+def answer_question(llm, message: str, item_id: str, consumption: dict, context: dict,
+                    parent_run_id=None) -> str:
+    """Answer a seller's question about a specific item, grounded in computed facts."""
+    c = consumption[item_id]
+    with trace_run(
+        "answer_question",
+        run_type="llm",
+        inputs={"message": message, "item_id": item_id, "item_name": c["item_name"]},
+        metadata={
+            "item_id": item_id,
+            "item_name": c["item_name"],
+            "category": c.get("category", ""),
+            "risk": c.get("risk", ""),
+            "on_hand": c.get("on_hand", 0),
+            "days_of_cover": c.get("days_of_cover"),
+            "module": "chatbot",
+        },
+        tags=["llm", "question_answer"],
+        parent_run_id=parent_run_id,
+    ) as run:
+        facts = plain_facts(item_id, consumption, context)
+        prompt = (
+            "You are an inventory assistant answering a shop owner's question about one item "
+            "in their shop. Answer in one or two short, plain sentences they'd find useful -- "
+            "no jargon, no field names.\n\n"
+            "Use only the facts below and never invent a number. If they're asking whether they "
+            "need to order something, the line about what the system is recommending is the answer. "
+            "If they're asking why something was flagged, explain the reason in the facts (running "
+            "low, a festival driving demand, or selling faster than usual).\n\n"
+            f"Facts:\n{facts}\n\nTheir question: \"{message}\""
+        )
+        try:
+            answer = llm.with_structured_output(ChatAnswer).invoke(prompt).answer
+            run._extra_outputs = {"answer": answer, "method": "llm_structured"}
+            return answer
+        except Exception:
+            fallback = f"Here's what I have on {c_name(consumption, item_id)}:\n{facts}"
+            run._extra_outputs = {"answer": fallback, "method": "fallback_facts"}
+            return fallback
 
 
 def c_name(consumption: dict, item_id: str) -> str:
     return consumption[item_id]["item_name"]
 
 
-@traceable(name="respond", run_type="chain")
 def respond(llm, message: str, consumption: dict, context: dict) -> dict:
     """
     The single entry point. Returns one of:
@@ -275,34 +301,52 @@ def respond(llm, message: str, consumption: dict, context: dict) -> dict:
       {"kind": "command", "item_id": ..., "action": ..., "reject_reason": ...,
        "text": "..."}                                   -- detected, NOT executed
       {"kind": "unclear", "text": "..."}
+
+    Traced as a parent span with classify_intent and answer_question as children.
     """
-    item_id = resolve_item_id(message, consumption)
-    if item_id is None:
-        return dict(kind="unclear", text="I'm not sure which item that's about -- try naming it directly.")
+    with trace_run(
+        "respond",
+        run_type="chain",
+        inputs={"message": message},
+        metadata={"module": "chatbot"},
+        tags=["chatbot", "entry_point"],
+    ) as run:
+        item_id = resolve_item_id(message, consumption)
+        if item_id is None:
+            run._extra_outputs = {"kind": "unclear", "reason": "no_item_match"}
+            return dict(kind="unclear", text="I'm not sure which item that's about -- try naming it directly.")
 
-    item_name = consumption[item_id]["item_name"]
-    intent = classify_intent(llm, message, item_name)
+        item_name = consumption[item_id]["item_name"]
+        run._extra_meta = {"item_id": item_id, "item_name": item_name}
 
-    if intent.kind == "command":
-        # the seller's own words win over the model's for both fields; the reason
-        # is taken ONLY from the message, never from the model (see extract_reject_reason)
-        action = extract_command_action(message) or intent.command_action
-        reason = extract_reject_reason(message)
+        intent = classify_intent(llm, message, item_name, parent_run_id=run.id)
 
-        if action is None:
-            return dict(kind="unclear",
-                        text=f"I can tell this is about {item_name}, but not what you want done with it -- approve, reject, or snooze?")
-        if action == "reject" and reason is None:
-            return dict(kind="unclear",
-                        text=f"Got that you want to reject {item_name} -- what's the reason? "
-                             "(quantity too high, quantity too low, supplier unreliable, or not needed right now)")
-        return dict(
-            kind="command", item_id=item_id, action=action, reject_reason=reason,
-            text=f"Got it -- {action} on {item_name}"
-                 + (f" ({reason.replace('_', ' ')})" if reason else "") + ". Confirm to apply this.",
-        )
+        if intent.kind == "command":
+            action = extract_command_action(message) or intent.command_action
+            reason = extract_reject_reason(message)
 
-    if intent.kind == "question":
-        return dict(kind="answer", text=answer_question(llm, message, item_id, consumption, context))
+            if action is None:
+                run._extra_outputs = {"kind": "unclear", "reason": "no_action_detected", "item": item_name}
+                return dict(kind="unclear",
+                            text=f"I can tell this is about {item_name}, but not what you want done with it -- approve, reject, or snooze?")
+            if action == "reject" and reason is None:
+                run._extra_outputs = {"kind": "unclear", "reason": "reject_without_reason", "item": item_name}
+                return dict(kind="unclear",
+                            text=f"Got that you want to reject {item_name} -- what's the reason? "
+                                 "(quantity too high, quantity too low, supplier unreliable, or not needed right now)")
 
-    return dict(kind="unclear", text=f"I found {item_name} but I'm not sure what you're asking -- could you rephrase?")
+            result = dict(
+                kind="command", item_id=item_id, action=action, reject_reason=reason,
+                text=f"Got it -- {action} on {item_name}"
+                     + (f" ({reason.replace('_', ' ')})" if reason else "") + ". Confirm to apply this.",
+            )
+            run._extra_outputs = {"kind": "command", "action": action, "item": item_name}
+            return result
+
+        if intent.kind == "question":
+            answer = answer_question(llm, message, item_id, consumption, context, parent_run_id=run.id)
+            run._extra_outputs = {"kind": "answer", "item": item_name, "answer_preview": answer[:100]}
+            return dict(kind="answer", text=answer)
+
+        run._extra_outputs = {"kind": "unclear", "reason": "intent_unclear", "item": item_name}
+        return dict(kind="unclear", text=f"I found {item_name} but I'm not sure what you're asking -- could you rephrase?")
