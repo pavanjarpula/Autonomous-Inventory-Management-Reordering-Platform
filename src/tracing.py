@@ -109,7 +109,9 @@ def trace_run(
 
 
 class _NoopRun:
-    """Dummy run when LangSmith is unavailable."""
+    """Dummy run when LangSmith is unavailable. Supports .id and attribute access."""
     id = None
+    def __getattr__(self, name):
+        return None
     def set_outputs(self, **kw): pass
     def update(self, **kw): pass
