@@ -6,7 +6,7 @@ Implements:
 2. Auto-approval for low-risk items based on confidence thresholds
 3. WhatsApp/Email notification via Twilio
 
-LangSmith: all operations are traceable via @traceable decorators.
+LangSmith: all operations are traceable via LangSmith tracing (trace_run()).
 """
 
 import json
@@ -16,14 +16,6 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from logger import get_logger
@@ -68,7 +60,6 @@ class AutoApprovalEngine:
     def __init__(self, thresholds: dict | None = None):
         self.thresholds = {**AUTO_APPROVE_THRESHOLDS, **(thresholds or {})}
 
-    @traceable(name="should_auto_approve", run_type="chain")
     def should_auto_approve(self, recommendation: dict) -> dict:
         """
         Determine if a recommendation should be auto-approved.
@@ -125,7 +116,6 @@ class AutoApprovalEngine:
             "order_value": order_value,
         }
 
-    @traceable(name="classify_recommendations", run_type="chain")
     def classify_recommendations(
         self,
         recommendations: list[dict],
@@ -201,7 +191,6 @@ class WhatsAppNotifier:
         """Check if email is configured."""
         return bool(self.account_sid and self.auth_token and self.from_email)
 
-    @traceable(name="send_whatsapp", run_type="chain")
     def send_notification(
         self,
         to_number: str,
@@ -261,7 +250,6 @@ class WhatsAppNotifier:
                 "error": str(e),
             }
 
-    @traceable(name="send_email", run_type="chain")
     def send_email(
         self,
         to_email: str,
@@ -343,7 +331,6 @@ class WhatsAppNotifier:
                 "error": str(e),
             }
 
-    @traceable(name="send_daily_summary_email", run_type="chain")
     def send_daily_summary_email(
         self,
         to_email: str,
@@ -433,7 +420,6 @@ class WhatsAppNotifier:
 
         return self.send_email(to_email, subject, html_content)
 
-    @traceable(name="send_recommendation_alert_email", run_type="chain")
     def send_recommendation_alert_email(
         self,
         to_email: str,
@@ -486,7 +472,6 @@ class WhatsAppNotifier:
 
 # ---- Per-item Interrupt Pattern ----
 
-@traceable(name="per_item_interrupt", run_type="chain")
 def per_item_interrupt(
     recommendations: list[dict],
     auto_approve_engine: AutoApprovalEngine | None = None,

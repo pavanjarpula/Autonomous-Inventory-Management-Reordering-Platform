@@ -7,7 +7,7 @@ Extends forecast.py with:
 3. Cross-validation and model diagnostics
 4. Ensemble forecasting (Prophet + statistical methods)
 
-LangSmith: all operations are traceable via @traceable decorators.
+LangSmith: all operations are traceable via LangSmith tracing (trace_run()).
 """
 
 import sys
@@ -19,14 +19,6 @@ import pandas as pd
 from prophet import Prophet
 from prophet.diagnostics import cross_validation, performance_metrics
 
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from context_agent import promo_flag_series, to_prophet_holidays
 from logger import get_logger
@@ -36,7 +28,6 @@ logger = get_logger(__name__, extra_data={"module": "enhanced_forecast"})
 
 # ---- Hierarchical Forecasting ----
 
-@traceable(name="fit_hierarchical_model", run_type="chain")
 def fit_hierarchical_model(
     sales: pd.DataFrame,
     items: pd.DataFrame,
@@ -176,7 +167,6 @@ def _fit_item_model(
 
 # ---- External Regressors ----
 
-@traceable(name="add_external_regressors", run_type="chain")
 def add_external_regressors(
     model: Prophet,
     future: pd.DataFrame,
@@ -210,7 +200,6 @@ def add_external_regressors(
 
 # ---- Cross-validation and Diagnostics ----
 
-@traceable(name="cross_validate_model", run_type="chain")
 def cross_validate_model(
     model: Prophet,
     initial: str = "90 days",
@@ -258,7 +247,6 @@ def cross_validate_model(
 
 # ---- Ensemble Forecasting ----
 
-@traceable(name="ensemble_forecast", run_type="chain")
 def ensemble_forecast(
     models: list[Prophet],
     future: pd.DataFrame,
@@ -289,7 +277,6 @@ def ensemble_forecast(
 
 # ---- Model Selection ----
 
-@traceable(name="select_best_model", run_type="chain")
 def select_best_model(
     sales: pd.DataFrame,
     item_id: str,

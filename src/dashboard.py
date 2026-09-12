@@ -504,8 +504,6 @@ if section == "Ask":
 
     question = st.chat_input("Ask a question, or tell it to approve/reject something")
     if question:
-        # rendered inline rather than via st.rerun(): a rerun here would discard
-        # the answer's place in the page and send the user back to the top
         st.session_state.chat_messages.append(("user", question))
         with st.chat_message("user"):
             st.write(question)
@@ -516,50 +514,28 @@ if section == "Ask":
 
         with trace_run(
             "chat_question",
-            run_type="chain",
             inputs={"question": question, "business_date": str(as_of.date())},
-            metadata={
-                "business_date": str(as_of.date()),
-                "provider": live_provider or "cached",
-                "n_items_assessed": len(all_items),
-                "section": "chat",
-            },
-            tags=["chat", "rag"],
+            metadata={"provider": live_provider or "cached", "n_items": len(all_items)},
+            tags=["chat"],
         ) as top_run:
-            # RAG retrieval
-            rag_context = ""
+            # RAG context retrieval
             rag_store = get_rag_store()
-            with trace_run(
-                "rag_retrieval",
-                run_type="chain",
-                inputs={"question": question, "k": 3},
-                metadata={"module": "rag", "k": 3},
-                tags=["rag", "vector_search"],
-                parent_run_id=top_run.id,
-            ) as rag_run:
-                if rag_store:
-                    try:
-                        rag_context = rag_store.retrieve_context(question, k=3)
-                        rag_run._extra_outputs = {
-                            "context_length": len(rag_context),
-                            "has_context": bool(rag_context and rag_context != "No relevant context found."),
-                        }
-                    except Exception as e:
-                        logger.warning(f"RAG retrieval failed: {e}")
-                        rag_run._extra_outputs = {"error": str(e)}
-                else:
-                    rag_run._extra_outputs = {"rag_available": False}
+            rag_context = ""
+            if rag_store:
+                try:
+                    rag_context = rag_store.retrieve_context(question, k=3)
+                except Exception as e:
+                    logger.warning(f"RAG retrieval failed: {e}")
 
-            # Chatbot response (respond() creates its own nested children)
+            # Chatbot (respond() adds classify_intent + answer_question as children)
             result = respond(get_llm(), question, all_items, context)
 
-            # Append RAG context to response if available
             if rag_context and rag_context != "No relevant context found.":
                 result["text"] += f"\n\n📚 *Additional context from knowledge base:*"
 
             top_run._extra_outputs = {
-                "answer_kind": result.get("kind", ""),
-                "answer_preview": result.get("text", "")[:200],
+                "kind": result.get("kind", ""),
+                "answer": result.get("text", "")[:200],
                 "rag_used": bool(rag_context and rag_context != "No relevant context found."),
             }
 

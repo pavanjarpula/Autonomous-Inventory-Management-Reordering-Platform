@@ -11,7 +11,7 @@ The supervisor orchestrates tool calls in a ReAct-style loop, bounded by
 max_iterations to prevent runaway loops. Each iteration either calls tools
 or produces a final answer.
 
-LangSmith: all agents are traceable via @traceable decorators.
+LangSmith: all agents are traceable via LangSmith tracing (trace_run()).
 """
 
 import sys
@@ -25,14 +25,6 @@ try:
     from langchain_core.tools import tool
 except ImportError:
     pass
-
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from logger import get_logger
@@ -78,7 +70,6 @@ class SupervisorDecision(BaseModel):
 
 # ---- Supervisor Agent ----
 
-@traceable(name="supervisor_agent", run_type="chain")
 def supervisor_agent(
     llm,
     messages: list,
@@ -168,7 +159,6 @@ def supervisor_agent(
 
 # ---- Specialist Agents ----
 
-@traceable(name="inventory_analyst_agent", run_type="chain")
 def inventory_analyst_agent(llm, item_id: str, as_of_date: str) -> dict:
     """
     Specialist agent that produces a structured inventory analysis.
@@ -236,7 +226,6 @@ def inventory_analyst_agent(llm, item_id: str, as_of_date: str) -> dict:
         }
 
 
-@traceable(name="chat_agent", run_type="chain")
 def chat_agent(llm, message: str, consumption: dict, context: dict, as_of_date: str) -> str:
     """
     Chat agent that answers natural language questions about inventory.

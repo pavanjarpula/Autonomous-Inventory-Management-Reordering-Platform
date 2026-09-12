@@ -11,7 +11,7 @@ Environment:
     GOOGLE_CALENDAR_ID: Calendar ID (default: "primary")
     GOOGLE_CREDENTIALS_PATH: Path to service account JSON or OAuth token
 
-LangSmith: all operations are traceable via @traceable decorators.
+LangSmith: all operations are traceable via LangSmith tracing (trace_run()).
 """
 
 import json
@@ -21,14 +21,6 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from logger import get_logger
@@ -125,7 +117,6 @@ class GoogleCalendarClient:
         self._service = build("calendar", "v3", credentials=credentials)
         return self._service
 
-    @traceable(name="fetch_calendar_events", run_type="chain")
     def fetch_events(
         self,
         time_min: datetime | None = None,
@@ -175,7 +166,6 @@ class GoogleCalendarClient:
             return []
 
 
-@traceable(name="events_to_festival_calendar", run_type="chain")
 def events_to_festival_calendar(
     events: list[dict],
     category_map: dict | None = None,
@@ -236,7 +226,6 @@ def events_to_festival_calendar(
     return pd.DataFrame(rows)
 
 
-@traceable(name="load_festival_data", run_type="chain")
 def load_festival_data(
     csv_path: str | Path | None = None,
     calendar_id: str = "primary",

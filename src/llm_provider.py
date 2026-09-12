@@ -16,21 +16,12 @@ Provider packages are imported lazily and are all optional -- an uninstalled
 provider raises a message telling you exactly what to install, rather than
 breaking import for everyone else.
 
-LangSmith integration: all functions are traceable via @traceable decorators.
+LangSmith integration: all functions are traceable via LangSmith tracing (trace_run()).
 Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY to enable tracing.
 """
 
 import os
 from dataclasses import dataclass
-
-try:
-    from langsmith import traceable
-except ImportError:
-    # Fallback: no-op decorator if langsmith is not installed
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
 
 
 def _get_secret(key: str) -> str | None:
@@ -73,7 +64,6 @@ def _package_installed(package: str) -> bool:
     return importlib.util.find_spec(package) is not None
 
 
-@traceable(name="provider_status", run_type="chain")
 def provider_status(name: str) -> ProviderStatus:
     spec = PROVIDERS[name]
     return ProviderStatus(
@@ -85,12 +75,10 @@ def provider_status(name: str) -> ProviderStatus:
     )
 
 
-@traceable(name="available_providers", run_type="chain")
 def available_providers() -> list[str]:
     return [name for name in _PREFERENCE if provider_status(name).usable]
 
 
-@traceable(name="resolve_provider", run_type="chain")
 def resolve_provider(explicit: str | None = None) -> str:
     if explicit:
         if explicit not in PROVIDERS:
@@ -113,7 +101,6 @@ def resolve_provider(explicit: str | None = None) -> str:
     return usable[0]
 
 
-@traceable(name="make_llm", run_type="llm")
 def make_llm(provider: str | None = None, model: str | None = None, temperature: float = 0):
     """Returns a LangChain chat model. Same interface whichever provider backs it."""
     name = resolve_provider(provider)

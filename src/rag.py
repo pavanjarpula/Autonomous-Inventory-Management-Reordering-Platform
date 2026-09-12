@@ -5,7 +5,7 @@ Indexes item metadata, historical feedback, and sales summaries so the
 chatbot can retrieve relevant context for natural language queries.
 Uses sentence-transformers for embeddings (local, no API needed).
 
-LangSmith: all operations are traceable via @traceable decorators.
+LangSmith: all operations are traceable via LangSmith tracing (trace_run()).
 """
 
 import json
@@ -27,14 +27,6 @@ try:
     HAS_SENTENCE_TRANSFORMERS = True
 except ImportError:
     HAS_SENTENCE_TRANSFORMERS = False
-
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from logger import get_logger
@@ -196,7 +188,6 @@ class InventoryVectorStore:
         self._documents = documents
         self._metadatas = metadatas
 
-    @traceable(name="vector_search", run_type="chain")
     def search(
         self,
         query: str,
@@ -236,7 +227,6 @@ class InventoryVectorStore:
 
         return results
 
-    @traceable(name="retrieve_context", run_type="chain")
     def retrieve_context(
         self,
         query: str,

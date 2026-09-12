@@ -41,14 +41,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
-try:
-    from langsmith import traceable
-except ImportError:
-    def traceable(name=None, run_type="chain"):
-        def decorator(func):
-            return func
-        return decorator
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from context_agent import get_context
 from engine import assess_item, days_to_next_arrival, on_order_qty
@@ -113,7 +105,6 @@ def make_gather_signals_node(sales, items, suppliers, festival_calendar, festiva
     is recommended every morning until the goods physically arrive."""
     params_by_item = params_by_item or {}
 
-    @traceable(name="gather_signals", run_type="chain")
     def gather_signals(state: SellerSenseState) -> dict:
         as_of = pd.Timestamp(state["as_of_date"])
         flagged = {}
@@ -289,7 +280,6 @@ def make_reasoning_node(llm, festival_calendar: pd.DataFrame, max_attempts: int 
     structured_llm = llm.with_structured_output(RankedRecommendations)
     all_festival_names = set(festival_calendar["festival_name"])
 
-    @traceable(name="reasoning", run_type="llm")
     def reasoning(state: SellerSenseState) -> dict:
         consumption, context = state["consumption_signals"], state["context_signals"]
         if not consumption:
@@ -355,7 +345,6 @@ def make_reasoning_node(llm, festival_calendar: pd.DataFrame, max_attempts: int 
 
 # ---------------------------------------------------------------- human approval
 
-@traceable(name="human_approval", run_type="chain")
 def human_approval(state: SellerSenseState) -> dict:
     decision = interrupt({
         "recommendations": state["ranked_recommendations"],
@@ -366,7 +355,6 @@ def human_approval(state: SellerSenseState) -> dict:
 
 # ---------------------------------------------------------------- graph assembly
 
-@traceable(name="build_graph", run_type="chain")
 def build_graph(
     sales, items, suppliers, festival_calendar, festival_overrides, 
     promotions, llm, max_items: int = 8, params_by_item: dict | None = None, 

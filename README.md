@@ -131,7 +131,7 @@ flowchart TB
 
     subgraph OBSERVE["Observability — logger.py + LangSmith"]
         STRUCTURED[Structured Logging<br/>JSON format]
-        TRACING[LangSmith Tracing<br/>@traceable decorators]
+        TRACING[LangSmith Tracing<br/>trace_run() nested spans]
     end
 
     SALES --> ENGINE
@@ -365,7 +365,7 @@ python src/run_backtest.py
 export SELLERSENSE_LLM_PROVIDER=groq
 export GROQ_API_KEY=your_key_here
 
-# LangSmith Observability
+# LangSmith Observability (free tier)
 export LANGCHAIN_TRACING_V2=true
 export LANGCHAIN_API_KEY=your_langsmith_key
 export LANGCHAIN_PROJECT=sellersense
@@ -400,6 +400,7 @@ export TWILIO_EMAIL_FROM=your_email@twilio.email
 │   ├── google_calendar.py     # Google Calendar integration (Phase 4)
 │   ├── hitl.py                # Auto-approval + notifications (Phase 5)
 │   ├── logger.py              # Structured JSON logging (Phase 1)
+│   ├── tracing.py             # LangSmith nested trace helper
 │   └── run_backtest.py        # Backtest runner
 ├── tests/                     # 186 tests
 │   ├── test_engine.py
@@ -435,7 +436,7 @@ export TWILIO_EMAIL_FROM=your_email@twilio.email
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | LangSmith observability + Python logging foundation | ✅ Complete |
+| 1 | LangSmith nested tracing (trace_run) + structured logging | ✅ Complete |
 | 2 | Tool calling with @tool decorators + multi-agent supervisor | ✅ Complete |
 | 3 | FAISS vector store + RAG-enhanced chatbot | ✅ Complete |
 | 4 | Google Calendar integration for dynamic festival detection | ✅ Complete |
