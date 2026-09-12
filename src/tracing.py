@@ -87,6 +87,10 @@ def trace_run(
         yield _NoopRun()
         return
 
+    if run is None:
+        yield _NoopRun()
+        return
+
     try:
         yield run
         if run and run.id:
